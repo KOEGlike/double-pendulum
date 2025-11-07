@@ -1,7 +1,8 @@
-<script>
+<script lang="ts">
 	import { T, useTask } from '@threlte/core';
-	import { interactivity, OrbitControls } from '@threlte/extras';
+	import { Align, interactivity, OrbitControls, PointsMaterial } from '@threlte/extras';
 	import { Spring } from 'svelte/motion';
+	import { BufferGeometry, SRGBColorSpace, TextureLoader } from 'three';
 
 	interactivity();
 	const scale = new Spring(1);
@@ -10,6 +11,30 @@
 	useTask((delta) => {
 		rotation += delta;
 	});
+
+	const sprite = new TextureLoader().load('disc.png');
+	//2sprite.colorSpace = SRGBColorSpace;
+
+	const spacing = 1;
+	const count = 10;
+
+	const total = count * count * count;
+	const positions = new Float32Array(total * 3);
+
+	// center grid around origin
+	const offset = (count - 1) * spacing * 0.5;
+
+	let index = 0;
+	for (let i = 0; i < count; i++) {
+		for (let j = 0; j < count; j++) {
+			for (let k = 0; k < count; k++) {
+				positions[index * 3 + 0] = spacing * i - offset; // x
+				positions[index * 3 + 1] = spacing * j - offset; // y
+				positions[index * 3 + 2] = spacing * k - offset; // z
+				index++;
+			}
+		}
+	}
 </script>
 
 <T.PerspectiveCamera
@@ -45,3 +70,27 @@
 	<T.CircleGeometry args={[4, 40]} />
 	<T.MeshStandardMaterial color="white" />
 </T.Mesh>
+
+<Align>
+	<T.Points>
+		<T.BufferGeometry>
+			<T.BufferAttribute
+				args={[positions, 3]}
+				attach={({ parent, ref }) => {
+					(parent as BufferGeometry).setAttribute('position', ref);
+					return () => {
+						// cleanup function called when ref changes or the component unmounts
+						// https://threlte.xyz/docs/reference/core/t#attach
+					};
+				}}
+			/>
+		</T.BufferGeometry>
+		<T.PointsMaterial
+			size={0.25}
+			map={sprite}
+			transparent={true}
+			alphaTest={0.1}
+			depthWrite={false}
+		/>
+	</T.Points>
+</Align>
