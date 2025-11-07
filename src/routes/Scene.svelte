@@ -1,6 +1,6 @@
 <script>
 	import { T, useTask } from '@threlte/core';
-	import { interactivity } from '@threlte/extras';
+	import { interactivity, OrbitControls } from '@threlte/extras';
 	import { Spring } from 'svelte/motion';
 
 	interactivity();
@@ -14,11 +14,14 @@
 
 <T.PerspectiveCamera
 	makeDefault
+	fov={50}
 	position={[10, 10, 10]}
 	oncreate={(ref) => {
 		ref.lookAt(0, 1, 0);
 	}}
-/>
+>
+	<OrbitControls enableDamping />
+</T.PerspectiveCamera>
 
 <T.DirectionalLight position={[0, 10, 10]} castShadow />
 
