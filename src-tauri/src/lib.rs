@@ -1,3 +1,4 @@
+use nalgebra::{DMatrix, DVector};
 use std::{f64::consts::PI, sync::Mutex};
 
 use tauri::Manager;
@@ -39,20 +40,93 @@ impl Bob {
 
 #[derive(Clone, Debug, PartialEq)]
 struct Pendulum {
-    origin: Coordinate,
     bobs: Vec<Bob>,
 }
 
 impl Pendulum {
-    fn new(origin: Coordinate, bobs: Vec<Bob>) -> Self {
-        Self { origin, bobs }
+    fn new(bobs: Vec<Bob>) -> Self {
+        Self { bobs }
+    }
+
+    fn n(&self) -> usize {
+        self.bobs.len()
+    }
+
+    fn mass_matrix(&self) -> DMatrix<f64> {
+        let n = self.n();
+        let mut mass_matrix = DMatrix::<f64>::zeros(n, n);
+
+        for i in 0..n {
+            for j in 0..n {
+                let mut sum = 0.0;
+                for k in std::cmp::max(i, j)..n {
+                    sum += self.bobs[k].mass
+                        * self.bobs[i].length_rod
+                        * self.bobs[j].length_rod
+                        * (self.bobs[i].theta - self.bobs[j].theta).cos();
+                }
+                mass_matrix[(i, j)] = sum;
+            }
+        }
+
+        mass_matrix
+    }
+
+    fn coriolis(&self) -> DVector<f64> {
+        let n = self.n();
+        let mut c = DVector::zeros(n);
+        for i in 0..n {
+            let mut val = 0.0;
+            for j in 0..n {
+                for k in std::cmp::max(i, j)..n {
+                    val += self.bobs[k].mass
+                        * self.bobs[i].length_rod
+                        * self.bobs[j].length_rod
+                        * (self.bobs[i].theta - self.bobs[j].theta).sin()
+                        * self.bobs[j].omega
+                        * self.bobs[i].omega;
+                }
+            }
+            c[i] = val;
+        }
+        c
+    }
+
+    fn gravity(&self) -> DVector<f64> {
+        let n = self.n();
+        let mut g_vec = DVector::zeros(n);
+        for i in 0..n {
+            let mut val = 0.0;
+            for k in i..n {
+                val += self.bobs[k].mass
+                    * GRAVITATIONAL_ACCELERATION
+                    * self.bobs[i].length_rod
+                    * self.bobs[i].theta.sin();
+            }
+            g_vec[i] = val;
+        }
+        g_vec
+    }
+
+    fn step(&mut self, dt: f64) {
+        let n = self.n();
+        let m = self.mass_matrix();
+        let c = self.coriolis();
+        let g = self.gravity();
+
+        let rhs = -(c + g);
+        let a = m.clone().lu().solve(&rhs).unwrap_or(DVector::zeros(n));
+
+        for i in 0..n {
+            self.bobs[i].omega += a[i] * dt;
+            self.bobs[i].theta += self.bobs[i].omega * dt;
+        }
     }
 }
 
 impl Default for Pendulum {
     fn default() -> Self {
         Self {
-            origin: Coordinate::new(300.0, 100.0),
             bobs: vec![
                 Bob::new(120.0, 10.0, PI / 2.0, 0.0),
                 Bob::new(120.0, 10.0, PI / 2.0, 0.0),
