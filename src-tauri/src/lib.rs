@@ -55,22 +55,21 @@ impl Pendulum {
 
     fn mass_matrix(&self) -> DMatrix<f64> {
         let n = self.n();
-        let mut mass_matrix = DMatrix::<f64>::zeros(n, n);
+        let mut mtx = DMatrix::<f64>::zeros(n, n);
 
         for i in 0..n {
+            let li = self.bobs[i].length_rod;
             for j in 0..n {
-                let mut sum = 0.0;
+                let lj = self.bobs[j].length_rod;
+                let theta_diff = self.bobs[i].theta - self.bobs[j].theta;
+                let mut sum_m = 0.0;
                 for k in std::cmp::max(i, j)..n {
-                    sum += self.bobs[k].mass
-                        * self.bobs[i].length_rod
-                        * self.bobs[j].length_rod
-                        * (self.bobs[i].theta - self.bobs[j].theta).cos();
+                    sum_m += self.bobs[k].mass;
                 }
-                mass_matrix[(i, j)] = sum;
+                mtx[(i, j)] = li * lj * sum_m * theta_diff.cos();
             }
         }
-
-        mass_matrix
+        mtx
     }
 
     fn suffix_masses(&self) -> Vec<f64> {
@@ -85,22 +84,19 @@ impl Pendulum {
     }
 
     fn d_mass_matrix_dtheta(&self, i: usize, j: usize, k: usize, suffix: &[f64]) -> f64 {
-        let s_ij = suffix[usize::max(i, j)];
         let li = self.bobs[i].length_rod;
         let lj = self.bobs[j].length_rod;
-        let d_ik = if i == k { 1.0 } else { 0.0 };
-        let d_jk = if j == k { 1.0 } else { 0.0 };
-        let theta_ij = self.bobs[i].theta - self.bobs[j].theta;
-        // d/dθ_k cos(θ_i - θ_j) = -sin(θ_i - θ_j) * (δ_{ik} - δ_{jk})
-        -s_ij * li * lj * theta_ij.sin() * (d_ik - d_jk)
+        let s_ij = suffix[std::cmp::max(i, j)];
+        let theta_diff = self.bobs[i].theta - self.bobs[j].theta;
+        let delta = (if i == k { 1.0 } else { 0.0 }) - (if j == k { 1.0 } else { 0.0 });
+        -s_ij * li * lj * theta_diff.sin() * delta
     }
 
     fn coriolis(&self) -> DVector<f64> {
         let n = self.n();
-        let mut c = DVector::zeros(n);
+        let mut c = DVector::<f64>::zeros(n);
         let suffix = self.suffix_masses();
 
-        // Christoffel symbols Γ_{i j k} = 1/2 (∂M_{i k}/∂θ_j + ∂M_{i j}/∂θ_k - ∂M_{j k}/∂θ_i)
         for i in 0..n {
             let mut ci = 0.0;
             for j in 0..n {
@@ -119,16 +115,14 @@ impl Pendulum {
 
     fn gravity(&self) -> DVector<f64> {
         let n = self.n();
-        let mut g_vec = DVector::zeros(n);
+        let suffix = self.suffix_masses();
+        let mut g_vec = DVector::<f64>::zeros(n);
+
         for i in 0..n {
-            let mut val = 0.0;
-            for k in i..n {
-                val += self.bobs[k].mass
-                    * GRAVITATIONAL_ACCELERATION
-                    * self.bobs[i].length_rod
-                    * self.bobs[i].theta.sin();
-            }
-            g_vec[i] = val;
+            let li = self.bobs[i].length_rod;
+            let s_i = suffix[i];
+            // ∂U/∂θ_i = - l_i * sin(theta_i) * (sum_{k>=i} m_k * g)
+            g_vec[i] = -li * self.bobs[i].theta.sin() * (s_i * GRAVITATIONAL_ACCELERATION);
         }
         g_vec
     }
@@ -139,28 +133,34 @@ impl Pendulum {
         let c = self.coriolis();
         let g = self.gravity();
 
-        let rhs = -(c + g);
-        let a = m.clone().lu().solve(&rhs).unwrap_or(DVector::zeros(n));
+        // Equations: M * theta_dd + C + G = 0  => theta_dd = - M^{-1} (C + G)
+        let rhs = -(&c + &g);
+        // solve for accelerations
+        let a = match m.clone().lu().solve(&rhs) {
+            Some(sol) => sol,
+            None => {
+                // fallback: if matrix singular, zero accelerations
+                DVector::zeros(n)
+            }
+        };
 
+        // symplectic Euler integrate
         for i in 0..n {
             self.bobs[i].omega += a[i] * dt;
+        }
+        for i in 0..n {
             self.bobs[i].theta += self.bobs[i].omega * dt;
         }
 
+        // update coordinates (positions) — cumulative sums from root
+        let mut cum_x = 0.0;
+        let mut cum_y = 0.0;
         for i in 0..n {
-            let x = self.bobs[i].length_rod * self.bobs[i].theta.sin()
-                + if i == 0 {
-                    0.0
-                } else {
-                    self.bobs[i - 1].coordinate.x
-                };
-            let y = self.bobs[i].length_rod * self.bobs[i].theta.cos()
-                + if i == 0 {
-                    0.0
-                } else {
-                    self.bobs[i - 1].coordinate.y
-                };
-            self.bobs[i].coordinate = Coordinate::new(x, y);
+            let xi = self.bobs[i].length_rod * self.bobs[i].theta.sin();
+            let yi = self.bobs[i].length_rod * self.bobs[i].theta.cos();
+            cum_x += xi;
+            cum_y += yi;
+            self.bobs[i].coordinate = Coordinate::new(cum_x, cum_y);
         }
     }
 }
@@ -169,8 +169,10 @@ impl Default for Pendulum {
     fn default() -> Self {
         Self {
             bobs: vec![
-                Bob::new(120.0, 10.0, PI / 2.0, 0.0),
-                Bob::new(120.0, 10.0, PI / 2.0, 0.0),
+                Bob::new(120.0, 10.0, PI / 10.0, 0.0),
+                Bob::new(120.0, 10.0, PI / 10.0, 0.0),
+                Bob::new(120.0, 10.0, PI / 10.0, 0.0),
+                Bob::new(120.0, 10.0, PI / 10.0, 0.0),
             ],
         }
     }
@@ -199,6 +201,7 @@ pub fn run() {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct PendulumState {
     angles: Vec<f64>,
     positions: Vec<Coordinate>,
@@ -212,7 +215,7 @@ async fn pendulum_state(
     loop {
         let state = {
             let mut app_data = data.lock().map_err(|e| e.to_string())?;
-            app_data.pendulum.step(0.016);
+            app_data.pendulum.step(0.005);
             let angles: Vec<f64> = app_data.pendulum.bobs.iter().map(|bob| bob.theta).collect();
             let positions: Vec<Coordinate> = app_data
                 .pendulum
@@ -224,6 +227,6 @@ async fn pendulum_state(
         };
 
         channel.send(state).map_err(|e| e.to_string())?;
-        tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+        tokio::time::sleep(std::time::Duration::from_micros(500)).await;
     }
 }

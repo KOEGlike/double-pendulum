@@ -1,23 +1,8 @@
 <script lang="ts">
-	import { T, useTask, useThrelte } from '@threlte/core';
-	import {
-		Align,
-		Environment,
-		interactivity,
-		OrbitControls,
-		PointsMaterial
-	} from '@threlte/extras';
-	import { Spring } from 'svelte/motion';
-	import { BufferGeometry, Color, Fog, Scene, SRGBColorSpace, TextureLoader } from 'three';
+	import { T, useThrelte } from '@threlte/core';
+	import { Align, interactivity, OrbitControls } from '@threlte/extras';
+	import { AmbientLight, BufferGeometry, Color, Fog, TextureLoader } from 'three';
 	import Pendulum from './Pendulum.svelte';
-
-	interactivity();
-	const scale = new Spring(1);
-
-	let rotation = $state(0);
-	useTask((delta) => {
-		rotation += delta;
-	});
 
 	useThrelte().scene.background = new Color().setHex(0x3d3d3d);
 	useThrelte().scene.fog = new Fog(0x3d3d3d, 10, 50);
@@ -26,7 +11,7 @@
 	//2sprite.colorSpace = SRGBColorSpace;
 
 	const spacing = 5;
-	const count = 100;
+	const count = 10;
 
 	const total = count * count * count;
 	const positions = new Float32Array(total * 3);
@@ -59,51 +44,29 @@
 </T.PerspectiveCamera>
 
 <T.DirectionalLight position={[0, 10, 10]} castShadow />
+<T.AmbientLight intensity={0.5} />
 
-<T.Mesh
-	rotation.y={rotation}
-	position.y={1}
-	scale={scale.current}
-	onpointerenter={() => {
-		scale.target = 1.5;
-	}}
-	onpointerleave={() => {
-		scale.target = 1;
-	}}
-	castShadow
->
-	<T.BoxGeometry args={[1, 2, 1]} />
-	<T.MeshStandardMaterial color="hotpink" />
-</T.Mesh>
-
-<T.Mesh rotation.x={-Math.PI / 2} receiveShadow>
-	<T.CircleGeometry args={[4, 40]} />
-	<T.MeshStandardMaterial color="white" />
-</T.Mesh>
-
-<Align>
-	<T.Points>
-		<T.BufferGeometry>
-			<T.BufferAttribute
-				args={[positions, 3]}
-				attach={({ parent, ref }) => {
-					(parent as BufferGeometry).setAttribute('position', ref);
-					return () => {
-						// cleanup function called when ref changes or the component unmounts
-						// https://threlte.xyz/docs/reference/core/t#attach
-					};
-				}}
-			/>
-		</T.BufferGeometry>
-		<T.PointsMaterial
-			size={0.25}
-			map={sprite}
-			transparent={true}
-			alphaTest={0.1}
-			depthWrite={false}
-			sizeAttenuation={true}
+<T.Points>
+	<T.BufferGeometry>
+		<T.BufferAttribute
+			args={[positions, 3]}
+			attach={({ parent, ref }) => {
+				(parent as BufferGeometry).setAttribute('position', ref);
+				return () => {
+					// cleanup function called when ref changes or the component unmounts
+					// https://threlte.xyz/docs/reference/core/t#attach
+				};
+			}}
 		/>
-	</T.Points>
-</Align>
+	</T.BufferGeometry>
+	<T.PointsMaterial
+		size={0.25}
+		map={sprite}
+		transparent={true}
+		alphaTest={0.1}
+		depthWrite={false}
+		sizeAttenuation={true}
+	/>
+</T.Points>
 
 <Pendulum />

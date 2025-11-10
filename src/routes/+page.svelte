@@ -2,6 +2,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { Canvas } from '@threlte/core';
 	import Scene from './Scene.svelte';
+	import { AsciiRenderer } from '@threlte/extras';
 
 	let name = $state('');
 	let greetMsg = $state('');
@@ -13,6 +14,14 @@
 	}
 </script>
 
-<Canvas>
-	<Scene />
-</Canvas>
+<div>
+	<Canvas>
+		<Scene />
+	</Canvas>
+</div>
+
+<style>
+	div {
+		position: relative;
+	}
+</style>
