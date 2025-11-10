@@ -170,7 +170,7 @@ impl Default for Pendulum {
         Self {
             bobs: vec![
                 Bob::new(120.0, 10.0, PI / 10.0, 0.0),
-                Bob::new(120.0, 10.0, PI / 10.0, 0.0),
+                Bob::new(120.0, 20.0, PI / 10.0, 0.0),
                 Bob::new(120.0, 10.0, PI / 10.0, 0.0),
                 Bob::new(120.0, 10.0, PI / 10.0, 0.0),
             ],
@@ -195,16 +195,30 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![pendulum_state])
+        .invoke_handler(tauri::generate_handler![
+            pendulum_state,
+            add_bob,
+            remove_bob,
+            modify_bob
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct BobState {
+    theta: f64,
+    omega: f64,
+    position: Coordinate,
+    mass: f64,
+    length_rod: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct PendulumState {
-    angles: Vec<f64>,
-    positions: Vec<Coordinate>,
+    bobs: Vec<BobState>,
 }
 
 #[tauri::command]
@@ -216,17 +230,77 @@ async fn pendulum_state(
         let state = {
             let mut app_data = data.lock().map_err(|e| e.to_string())?;
             app_data.pendulum.step(0.005);
-            let angles: Vec<f64> = app_data.pendulum.bobs.iter().map(|bob| bob.theta).collect();
-            let positions: Vec<Coordinate> = app_data
+            let bob_states: Vec<BobState> = app_data
                 .pendulum
                 .bobs
                 .iter()
-                .map(|bob| bob.coordinate)
+                .map(|bob| BobState {
+                    theta: bob.theta,
+                    position: bob.coordinate,
+                    mass: bob.mass,
+                    length_rod: bob.length_rod,
+                    omega: bob.omega,
+                })
                 .collect();
-            PendulumState { angles, positions }
+            PendulumState { bobs: bob_states }
         };
 
         channel.send(state).map_err(|e| e.to_string())?;
         tokio::time::sleep(std::time::Duration::from_micros(500)).await;
     }
+}
+
+#[tauri::command]
+fn add_bob(
+    data: tauri::State<'_, AppData>,
+    length_rod: f64,
+    mass: f64,
+    theta: f64,
+    omega: f64,
+) -> Result<(), String> {
+    let mut app_data = data.lock().map_err(|e| e.to_string())?;
+    app_data
+        .pendulum
+        .bobs
+        .push(Bob::new(length_rod, mass, theta, omega));
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_bob(data: tauri::State<'_, AppData>, index: usize) -> Result<(), String> {
+    let mut app_data = data.lock().map_err(|e| e.to_string())?;
+    if index >= app_data.pendulum.bobs.len() {
+        return Err("Index out of bounds".into());
+    }
+    app_data.pendulum.bobs.remove(index);
+    Ok(())
+}
+
+#[tauri::command]
+fn modify_bob(
+    data: tauri::State<'_, AppData>,
+    index: usize,
+    length: Option<f64>,
+    mass: Option<f64>,
+    theta: Option<f64>,
+    omega: Option<f64>,
+) -> Result<(), String> {
+    let mut app_data = data.lock().map_err(|e| e.to_string())?;
+    if index >= app_data.pendulum.bobs.len() {
+        return Err("Index out of bounds".into());
+    }
+    let bob = app_data.pendulum.bobs.get_mut(index).unwrap();
+    if let Some(l) = length {
+        bob.length_rod = l;
+    }
+    if let Some(m) = mass {
+        bob.mass = m;
+    }
+    if let Some(t) = theta {
+        bob.theta = t;
+    }
+    if let Some(o) = omega {
+        bob.omega = o;
+    }
+    Ok(())
 }

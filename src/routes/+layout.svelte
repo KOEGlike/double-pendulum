@@ -7,6 +7,7 @@
 <style>
 	:global(body) {
 		margin: 0;
+		height: 100vh;
 	}
 
 	:global(html) {

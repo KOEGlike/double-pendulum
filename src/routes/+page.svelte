@@ -3,6 +3,7 @@
 	import { Canvas } from '@threlte/core';
 	import Scene from './Scene.svelte';
 	import { AsciiRenderer } from '@threlte/extras';
+	import Control from './Control.svelte';
 
 	let name = $state('');
 	let greetMsg = $state('');
@@ -18,10 +19,11 @@
 	<Canvas>
 		<Scene />
 	</Canvas>
+	<Control />
 </div>
 
 <style>
 	div {
-		position: relative;
+		height: 100%;
 	}
 </style>
