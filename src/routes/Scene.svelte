@@ -9,6 +9,7 @@
 	} from '@threlte/extras';
 	import { Spring } from 'svelte/motion';
 	import { BufferGeometry, Color, Fog, Scene, SRGBColorSpace, TextureLoader } from 'three';
+	import Pendulum from './Pendulum.svelte';
 
 	interactivity();
 	const scale = new Spring(1);
@@ -104,3 +105,5 @@
 		/>
 	</T.Points>
 </Align>
+
+<Pendulum />

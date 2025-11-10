@@ -1,11 +1,12 @@
 use nalgebra::{DMatrix, DVector};
+use serde::{Deserialize, Serialize};
 use std::{f64::consts::PI, sync::Mutex};
 
-use tauri::Manager;
+use tauri::{ipc::Channel, Manager};
 
 const GRAVITATIONAL_ACCELERATION: f64 = 9.81;
 
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
 struct Coordinate {
     x: f64,
     y: f64,
@@ -72,22 +73,46 @@ impl Pendulum {
         mass_matrix
     }
 
+    fn suffix_masses(&self) -> Vec<f64> {
+        let n = self.n();
+        let mut s = vec![0.0; n];
+        let mut acc = 0.0;
+        for i in (0..n).rev() {
+            acc += self.bobs[i].mass;
+            s[i] = acc;
+        }
+        s
+    }
+
+    fn d_mass_matrix_dtheta(&self, i: usize, j: usize, k: usize, suffix: &[f64]) -> f64 {
+        let s_ij = suffix[usize::max(i, j)];
+        let li = self.bobs[i].length_rod;
+        let lj = self.bobs[j].length_rod;
+        let d_ik = if i == k { 1.0 } else { 0.0 };
+        let d_jk = if j == k { 1.0 } else { 0.0 };
+        let theta_ij = self.bobs[i].theta - self.bobs[j].theta;
+        // d/dθ_k cos(θ_i - θ_j) = -sin(θ_i - θ_j) * (δ_{ik} - δ_{jk})
+        -s_ij * li * lj * theta_ij.sin() * (d_ik - d_jk)
+    }
+
     fn coriolis(&self) -> DVector<f64> {
         let n = self.n();
         let mut c = DVector::zeros(n);
+        let suffix = self.suffix_masses();
+
+        // Christoffel symbols Γ_{i j k} = 1/2 (∂M_{i k}/∂θ_j + ∂M_{i j}/∂θ_k - ∂M_{j k}/∂θ_i)
         for i in 0..n {
-            let mut val = 0.0;
+            let mut ci = 0.0;
             for j in 0..n {
-                for k in std::cmp::max(i, j)..n {
-                    val += self.bobs[k].mass
-                        * self.bobs[i].length_rod
-                        * self.bobs[j].length_rod
-                        * (self.bobs[i].theta - self.bobs[j].theta).sin()
-                        * self.bobs[j].omega
-                        * self.bobs[i].omega;
+                for k in 0..n {
+                    let dM_ik_dth_j = self.d_mass_matrix_dtheta(i, k, j, &suffix);
+                    let dM_ij_dth_k = self.d_mass_matrix_dtheta(i, j, k, &suffix);
+                    let dM_jk_dth_i = self.d_mass_matrix_dtheta(j, k, i, &suffix);
+                    let gamma = 0.5 * (dM_ik_dth_j + dM_ij_dth_k - dM_jk_dth_i);
+                    ci += gamma * self.bobs[j].omega * self.bobs[k].omega;
                 }
             }
-            c[i] = val;
+            c[i] = ci;
         }
         c
     }
@@ -121,6 +146,22 @@ impl Pendulum {
             self.bobs[i].omega += a[i] * dt;
             self.bobs[i].theta += self.bobs[i].omega * dt;
         }
+
+        for i in 0..n {
+            let x = self.bobs[i].length_rod * self.bobs[i].theta.sin()
+                + if i == 0 {
+                    0.0
+                } else {
+                    self.bobs[i - 1].coordinate.x
+                };
+            let y = self.bobs[i].length_rod * self.bobs[i].theta.cos()
+                + if i == 0 {
+                    0.0
+                } else {
+                    self.bobs[i - 1].coordinate.y
+                };
+            self.bobs[i].coordinate = Coordinate::new(x, y);
+        }
     }
 }
 
@@ -152,12 +193,37 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![pendulum_state])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
+#[derive(Serialize, Deserialize)]
+struct PendulumState {
+    angles: Vec<f64>,
+    positions: Vec<Coordinate>,
+}
+
 #[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+async fn pendulum_state(
+    data: tauri::State<'_, AppData>,
+    channel: Channel<PendulumState>,
+) -> Result<(), String> {
+    loop {
+        let state = {
+            let mut app_data = data.lock().map_err(|e| e.to_string())?;
+            app_data.pendulum.step(0.016);
+            let angles: Vec<f64> = app_data.pendulum.bobs.iter().map(|bob| bob.theta).collect();
+            let positions: Vec<Coordinate> = app_data
+                .pendulum
+                .bobs
+                .iter()
+                .map(|bob| bob.coordinate)
+                .collect();
+            PendulumState { angles, positions }
+        };
+
+        channel.send(state).map_err(|e| e.to_string())?;
+        tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+    }
 }
