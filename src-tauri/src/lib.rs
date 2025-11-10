@@ -229,7 +229,7 @@ async fn pendulum_state(
     loop {
         let state = {
             let mut app_data = data.lock().map_err(|e| e.to_string())?;
-            for _ in 0..4 {
+            for _ in 0..2 {
                 app_data.pendulum.step(0.016);
             }
             let bob_states: Vec<BobState> = app_data
@@ -248,7 +248,7 @@ async fn pendulum_state(
         };
 
         channel.send(state).map_err(|e| e.to_string())?;
-        tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(8)).await;
     }
 }
 
